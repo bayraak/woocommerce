@@ -241,7 +241,7 @@ class DeclaredToAgents {
 	 * @param array{status:int,body:string,headers:array<string,string>}|null $response Response, null when it couldn't be loaded.
 	 */
 	private static function is_markdown( ?array $response ): ?bool {
-		if ( null === $response || $response['status'] >= 500 ) {
+		if ( null === $response || StoreOutputChecks::blocked( $response['status'] ) ) {
 			return null;
 		}
 		$type = $response['headers']['content-type'] ?? '';
@@ -271,7 +271,7 @@ class DeclaredToAgents {
 	 */
 	private static function document_served( StoreResponses $responses, string $path, callable $test ): ?bool {
 		$response = $responses->get( StoreOutputChecks::host_root( $path ) );
-		if ( null === $response || $response['status'] >= 500 ) {
+		if ( null === $response || StoreOutputChecks::blocked( $response['status'] ) ) {
 			return null;
 		}
 		$document = 200 === $response['status'] ? json_decode( $response['body'], true ) : null;
@@ -287,7 +287,7 @@ class DeclaredToAgents {
 	 */
 	private static function file_served( StoreResponses $responses, string $path ): ?bool {
 		$response = $responses->get( StoreOutputChecks::host_root( $path ) );
-		if ( null === $response || $response['status'] >= 500 ) {
+		if ( null === $response || StoreOutputChecks::blocked( $response['status'] ) ) {
 			return null;
 		}
 		$body = ltrim( $response['body'], " \t\r\n\xEF\xBB\xBF" );

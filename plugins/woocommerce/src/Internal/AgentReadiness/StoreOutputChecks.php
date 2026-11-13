@@ -50,16 +50,26 @@ class StoreOutputChecks {
 	}
 
 	/**
-	 * Run every check. Each URL is requested at most once per set of responses.
+	 * Run every check. Each URL is requested at most once.
 	 *
 	 * A likely conflict also names the address where it was seen. It doesn't name a plugin: any list of
 	 * plugins goes stale, and several can change the same output.
 	 *
-	 * @param StoreResponses|null $responses Responses of the scan, or null for new ones.
 	 * @return array<int, array{id:string,ok:bool|null,blocks:string,group:string,level:string,name:string,label:string,why:string,fix:string,fix_url:string,conflict:bool,pending:bool,seen_at:string}>
 	 */
-	public function all( ?StoreResponses $responses = null ): array {
-		$responses = $responses ?? $this->responses();
+	public function all(): array {
+		return $this->all_for( $this->responses() );
+	}
+
+	/**
+	 * Run every check against one scan's responses, so other checks can read the same pages.
+	 *
+	 * @since 11.4.0
+	 *
+	 * @param StoreResponses $responses Responses of the scan.
+	 * @return array<int, array{id:string,ok:bool|null,blocks:string,group:string,level:string,name:string,label:string,why:string,fix:string,fix_url:string,conflict:bool,pending:bool,seen_at:string}>
+	 */
+	public function all_for( StoreResponses $responses ): array {
 		// The home page first: when it can't be reached, no other request is made.
 		$responses->home_page();
 		$results = array();
@@ -898,9 +908,11 @@ class StoreOutputChecks {
 	 * page is missing: a server error, or a firewall or security plugin answering 401 or 403.
 	 * A check then reports couldn't check, as it does when the page times out.
 	 *
+	 * @since 11.4.0
+	 *
 	 * @param int $status HTTP status.
 	 */
-	private static function blocked( int $status ): bool {
+	public static function blocked( int $status ): bool {
 		return $status >= 500 || in_array( $status, array( 401, 403 ), true );
 	}
 
