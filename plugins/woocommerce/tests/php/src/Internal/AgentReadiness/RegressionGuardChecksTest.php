@@ -193,6 +193,17 @@ class RegressionGuardChecksTest extends WC_Unit_Test_Case {
 		$this->assertFalse( $this->results( $store )['pages_public'] );
 
 		remove_all_filters( 'pre_http_request' );
+		update_option(
+			'woocommerce_myaccount_page_id',
+			self::factory()->post->create(
+				array(
+					'post_type'   => 'page',
+					'post_status' => 'publish',
+					'post_name'   => 'my-account',
+					'post_title'  => 'My account',
+				)
+			)
+		);
 		$account                         = wc_get_page_permalink( 'myaccount' );
 		$store[ $path ]                  = array( 302, '', array( 'location' => $account ) );
 		$store[ self::path( $account ) ] = array( 200, '<html>Sign in</html>' );
@@ -340,7 +351,15 @@ class RegressionGuardChecksTest extends WC_Unit_Test_Case {
 
 		update_post_meta( $reviewed->get_id(), '_wc_average_rating', '4.50' );
 		remove_all_filters( 'pre_http_request' );
-		$store[ $path ] = array( 200, '<script type="application/ld+json">' . wp_json_encode( array( '@type' => 'Product', 'name' => $reviewed->get_name() ) ) . '</script>' );
+		$store[ $path ] = array(
+			200,
+			'<script type="application/ld+json">' . wp_json_encode(
+				array(
+					'@type' => 'Product',
+					'name'  => $reviewed->get_name(),
+				)
+			) . '</script>',
+		);
 		$this->assertFalse( $this->results( $store )['product_review_markup'] );
 
 		update_option( 'woocommerce_enable_review_rating', 'no' );
@@ -349,7 +368,20 @@ class RegressionGuardChecksTest extends WC_Unit_Test_Case {
 
 		update_option( 'woocommerce_enable_review_rating', 'yes' );
 		remove_all_filters( 'pre_http_request' );
-		$store[ $path ] = array( 200, '<script type="application/ld+json">' . wp_json_encode( array( '@type' => 'Product', 'name' => $reviewed->get_name(), 'aggregateRating' => array( '@type' => 'AggregateRating', 'ratingValue' => '4.5', 'reviewCount' => '3' ) ) ) . '</script>' );
+		$store[ $path ] = array(
+			200,
+			'<script type="application/ld+json">' . wp_json_encode(
+				array(
+					'@type'           => 'Product',
+					'name'            => $reviewed->get_name(),
+					'aggregateRating' => array(
+						'@type'       => 'AggregateRating',
+						'ratingValue' => '4.5',
+						'reviewCount' => '3',
+					),
+				)
+			) . '</script>',
+		);
 		$this->assertTrue( $this->results( $store )['product_review_markup'] );
 
 		remove_all_filters( 'pre_http_request' );
