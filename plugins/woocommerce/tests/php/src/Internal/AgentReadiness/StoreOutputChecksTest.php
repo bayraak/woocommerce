@@ -603,6 +603,26 @@ class StoreOutputChecksTest extends WC_Unit_Test_Case {
 			)['gtin'],
 			'An @id of this product counts too'
 		);
+		$group = $product->get_permalink() . '#group';
+		$this->assertTrue(
+			$this->served_identifiers(
+				$product,
+				array(
+					array(
+						'@type' => 'ProductGroup',
+						'name'  => $product->get_name(),
+						'@id'   => $group,
+					),
+					array(
+						'@type'       => 'Product',
+						'name'        => 'Red',
+						'isVariantOf' => array( '@id' => $group ),
+						'gtin13'      => '4006381333931',
+					),
+				)
+			)['gtin'],
+			'A variant linked with isVariantOf counts'
+		);
 
 		$product->set_global_unique_id( '' );
 		$product->save();

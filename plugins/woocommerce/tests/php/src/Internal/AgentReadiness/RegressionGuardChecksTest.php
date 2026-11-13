@@ -178,6 +178,12 @@ class RegressionGuardChecksTest extends WC_Unit_Test_Case {
 		$path              = self::path( $this->product->get_permalink() );
 		$store[ $path ][2] = array( 'x-robots-tag' => 'noindex' );
 		$this->assertFalse( $this->results( $store )['no_noindex_directives'], 'Header' );
+
+		remove_all_filters( 'pre_http_request' );
+		$store          = $this->healthy_store();
+		$store['/']     = array( 200, '<html><head><meta name="robots" content="noindex"></head></html>' );
+		$store[ $path ] = array( 404, '' );
+		$this->assertFalse( $this->results( $store )['no_noindex_directives'], 'A noindex home page fails even when the product page did not load' );
 	}
 
 	/**
@@ -218,7 +224,7 @@ class RegressionGuardChecksTest extends WC_Unit_Test_Case {
 
 		remove_all_filters( 'pre_http_request' );
 		$store[ $path ] = array( 503, '' );
-		$this->assertTrue( $this->results( $store )['pages_public'], 'An error is not a login wall' );
+		$this->assertNull( $this->results( $store )['pages_public'], 'A server error is couldn\'t check' );
 	}
 
 	/**
@@ -273,6 +279,11 @@ class RegressionGuardChecksTest extends WC_Unit_Test_Case {
 		$store          = $this->healthy_store();
 		$store[ $path ] = array( 200, '<html><script type="application/ld+json">' . wp_json_encode( $jsonld ) . '</script><h1>' . $this->product->get_name() . '</h1></html>' );
 		$this->assertFalse( $this->results( $store )['schema_matches_product'], 'Price' );
+
+		remove_all_filters( 'pre_http_request' );
+		$jsonld['offers']['price'] = '99.00 USD';
+		$store[ $path ]            = array( 200, '<html><script type="application/ld+json">' . wp_json_encode( $jsonld ) . '</script><h1>' . $this->product->get_name() . '</h1></html>' );
+		$this->assertFalse( $this->results( $store )['schema_matches_product'], 'A price with a currency code' );
 
 		remove_all_filters( 'pre_http_request' );
 		$jsonld['offers']['price'] = $this->product->get_price();
@@ -442,6 +453,29 @@ class RegressionGuardChecksTest extends WC_Unit_Test_Case {
 		$hidden->set_catalog_visibility( 'hidden' );
 		$hidden->save();
 		update_post_meta( $hidden->get_id(), '_wc_average_rating', '5.00' );
+
+		$store = $this->healthy_store();
+		$store[ self::path( $visible->get_permalink() ) ] = array( 200, '<script type="application/ld+json">{"@type":"Product","name":"Mug"}</script>' );
+
+		$this->assertFalse( $this->results( $store )['product_review_markup'] );
+	}
+
+	/**
+	 * @testdox Hidden reviewed products are skipped before the sample limit, so an older visible one is still read.
+	 */
+	public function test_review_markup_skips_a_run_of_hidden_products(): void {
+		update_option( 'woocommerce_enable_reviews', 'yes' );
+		update_option( 'woocommerce_enable_review_rating', 'yes' );
+		$visible = WC_Helper_Product::create_simple_product();
+		$visible->set_date_created( time() - DAY_IN_SECONDS );
+		$visible->save();
+		update_post_meta( $visible->get_id(), '_wc_average_rating', '4.00' );
+		for ( $i = 0; $i < 5; $i++ ) {
+			$hidden = WC_Helper_Product::create_simple_product();
+			$hidden->set_catalog_visibility( 'hidden' );
+			$hidden->save();
+			update_post_meta( $hidden->get_id(), '_wc_average_rating', '5.00' );
+		}
 
 		$store = $this->healthy_store();
 		$store[ self::path( $visible->get_permalink() ) ] = array( 200, '<script type="application/ld+json">{"@type":"Product","name":"Mug"}</script>' );

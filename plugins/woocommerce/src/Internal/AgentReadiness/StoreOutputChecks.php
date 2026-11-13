@@ -804,8 +804,9 @@ class StoreOutputChecks {
 	}
 
 	/**
-	 * Whether a test passes on the home page and the product page. Null when either didn't load;
-	 * a store with no product to check is judged on its home page.
+	 * Whether a test passes on the home page and the product page. A failure on a page that loaded
+	 * counts even when the other page didn't. Null when a page that had to load didn't, and nothing failed.
+	 * A store with no product to check is judged on its home page.
 	 *
 	 * @param StoreResponses $responses Store responses.
 	 * @param callable       $test      Test, given the HTML and the response headers.
@@ -813,10 +814,14 @@ class StoreOutputChecks {
 	private function on_pages( StoreResponses $responses, callable $test ): ?bool {
 		$home    = $responses->home_page();
 		$product = $responses->product_page();
+		$result  = self::on_loaded( array( $home, $product ), $test );
+		if ( false === $result ) {
+			return false;
+		}
 		if ( null === $home || ( null === $product && null !== $responses->product() ) ) {
 			return null;
 		}
-		return self::on_loaded( array( $home, $product ), $test );
+		return $result;
 	}
 
 	/**
@@ -1056,6 +1061,67 @@ class StoreOutputChecks {
 	}
 
 	/**
+	 * The product's own items, including a variant listed separately and linked with isVariantOf.
+	 *
+	 * @param array<int, array<string, mixed>> $products Product items.
+	 * @param \WC_Product                      $product  The product of the page.
+	 * @return array<int, array<string, mixed>>
+	 */
+	private static function identifier_items( array $products, \WC_Product $product ): array {
+		$own = self::own_items( $products, $product );
+		return self::with_variants( array_merge( $own, self::variants_of( $own, $products ) ) );
+	}
+
+	/**
+	 * Items that say they are a variant of one of the selected items.
+	 *
+	 * @param array<int, array<string, mixed>> $own      Selected items.
+	 * @param array<int, array<string, mixed>> $products Every Product item on the page.
+	 * @return array<int, array<string, mixed>>
+	 */
+	private static function variants_of( array $own, array $products ): array {
+		$ids = array();
+		foreach ( $own as $item ) {
+			if ( is_string( $item['@id'] ?? null ) && '' !== $item['@id'] ) {
+				$ids[ self::comparable_url( $item['@id'] ) ] = true;
+			}
+		}
+		if ( array() === $ids ) {
+			return array();
+		}
+		$linked = array();
+		foreach ( $products as $item ) {
+			foreach ( self::variant_of_ids( $item ) as $id ) {
+				if ( isset( $ids[ self::comparable_url( $id ) ] ) ) {
+					$linked[] = $item;
+					break;
+				}
+			}
+		}
+		return $linked;
+	}
+
+	/**
+	 * @id values an item's isVariantOf gives.
+	 *
+	 * @param array<string, mixed> $item Product item.
+	 * @return array<int, string>
+	 */
+	private static function variant_of_ids( array $item ): array {
+		$of = $item['isVariantOf'] ?? null;
+		if ( is_string( $of ) ) {
+			return '' === $of ? array() : array( $of );
+		}
+		$ids = array();
+		foreach ( self::as_list( $of ) as $one ) {
+			if ( is_string( $one['@id'] ?? null ) && '' !== $one['@id'] ) {
+				$ids[] = $one['@id'];
+			}
+		}
+		return $ids;
+	}
+
+	/**
 	 * Whether a Product item, a variant or one of their offers has a BuyAction potentialAction.
 	 * Null for a variable product without one: WooCommerce doesn't link a variable product's
 	 * page to checkout, only a chosen variation.
@@ -1090,6 +1156,40 @@ class StoreOutputChecks {
 			return null;
 		}
 		return 200 === $response['status'] && is_array( json_decode( $response['body'], true ) );
+	}
+
+	/**
+	 * The number in a JSON-LD price, or null when it isn't one. `10,00` and `99.00 USD` count.
+	 *
+	 * @param mixed $value Price value.
+	 */
+	private static function price_amount( $value ): ?float {
+		if ( is_int( $value ) || is_float( $value ) ) {
+			return is_finite( $value ) ? (float) $value : null;
+		}
+		if ( ! is_string( $value ) || ! self::has_price_amount( $value ) ) {
+			return null;
+		}
+		$kept   = '';
+		$length = strlen( $value );
+		for ( $i = 0; $i < $length; $i++ ) {
+			$char = $value[ $i ];
+			if ( ctype_digit( $char ) || ',' === $char || '.' === $char || '-' === $char ) {
+				$kept .= $char;
+			}
+		}
+		$comma = strrpos( $kept, ',' );
+		$dot   = strrpos( $kept, '.' );
+		if ( false !== $comma && false !== $dot ) {
+			$decimal   = $dot > $comma ? '.' : ',';
+			$thousands = '.' === $decimal ? ',' : '.';
+			$kept      = str_replace( $decimal, '.', str_replace( $thousands, '', $kept ) );
+		} elseif ( false !== $comma && strlen( $kept ) - $comma - 1 <= 2 ) {
+			$kept = str_replace( ',', '.', $kept );
+		} else {
+			$kept = str_replace( ',', '', $kept );
+		}
+		return is_numeric( $kept ) ? (float) $kept : null;
 	}
 
 	/**
@@ -1226,7 +1326,7 @@ class StoreOutputChecks {
 			if ( self::sign_in_path( $followed['stopped_at'], $account ) || self::sign_in_path( $followed['final_url'], $account ) ) {
 				return false;
 			}
-			if ( null === $response ) {
+			if ( null === $response || $response['status'] >= 500 ) {
 				$unknown = true;
 			} elseif ( in_array( $response['status'], array( 401, 403 ), true ) ) {
 				return false;
@@ -1374,7 +1474,7 @@ class StoreOutputChecks {
 		if ( null === $product || ! ProductFields::needs_identifiers( $product ) ) {
 			return null;
 		}
-		foreach ( self::served_gtins( self::own_items( $products, $product ) ) as $gtin ) {
+		foreach ( self::served_gtins( self::identifier_items( $products, $product ) ) as $gtin ) {
 			if ( ProductFields::is_valid_gtin( $gtin ) ) {
 				return true;
 			}
@@ -1417,7 +1517,7 @@ class StoreOutputChecks {
 		if ( null === $product ) {
 			return null;
 		}
-		foreach ( self::with_variants( self::own_items( $products, $product ) ) as $item ) {
+		foreach ( self::identifier_items( $products, $product ) as $item ) {
 			foreach ( self::values( $item['brand'] ?? null ) as $brand ) {
 				$name = is_array( $brand ) ? ( $brand['name'] ?? null ) : $brand;
 				if ( is_string( $name ) && '' !== trim( $name ) ) {
@@ -1523,16 +1623,23 @@ class StoreOutputChecks {
 		if ( '' === $product->get_price() || $product->is_type( 'variable' ) ) {
 			return true;
 		}
-		$prices = array();
+		$prices    = array();
+		$unparsed  = false;
 		foreach ( self::offers( self::own_items( $products, $product ) ) as $offer ) {
 			foreach ( array_merge( array( $offer['price'] ?? null ), array_column( self::as_list( $offer['priceSpecification'] ?? null ), 'price' ) ) as $price ) {
-				if ( is_numeric( $price ) ) {
-					$prices[] = (float) $price;
+				if ( null === $price || '' === $price ) {
+					continue;
 				}
+				$amount = self::price_amount( $price );
+				if ( null === $amount ) {
+					$unparsed = true;
+					continue;
+				}
+				$prices[] = $amount;
 			}
 		}
 		if ( array() === $prices ) {
-			return true;
+			return $unparsed ? null : true;
 		}
 		$excl     = (float) wc_get_price_excluding_tax( $product );
 		$expected = array( (float) $product->get_price(), (float) wc_get_price_including_tax( $product ), $excl );
@@ -1575,7 +1682,15 @@ class StoreOutputChecks {
 				'orderby'          => 'date',
 				'order'            => 'DESC',
 				'suppress_filters' => false,
-				// phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query -- Five rows, once per background scan.
+				// phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_tax_query, WordPress.DB.SlowDBQuery.slow_db_query_meta_query -- Five rows, once per background scan.
+				'tax_query'        => array(
+					array(
+						'taxonomy' => 'product_visibility',
+						'field'    => 'slug',
+						'terms'    => array( 'exclude-from-catalog' ),
+						'operator' => 'NOT IN',
+					),
+				),
 				'meta_query'       => array(
 					array(
 						'key'     => '_wc_average_rating',
