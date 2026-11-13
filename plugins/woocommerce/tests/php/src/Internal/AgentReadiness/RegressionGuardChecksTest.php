@@ -93,7 +93,7 @@ class RegressionGuardChecksTest extends WC_Unit_Test_Case {
 		return array(
 			'/robots.txt'                                 => array( 200, "User-agent: *\nDisallow: /wp-admin/\n\nSitemap: " . home_url( '/wp-sitemap.xml' ) . "\n" ),
 			'/wp-sitemap.xml'                             => array( 200, '<urlset><url><loc>' . $this->product->get_permalink() . '</loc><lastmod>2026-11-01</lastmod></url></urlset>' ),
-			'/'                                           => array( 200, $head . '<link rel="alternate" type="application/rss+xml" href="/feed/"></head><body><h1>Store</h1><img src="a.jpg" alt="Mug"><img src="line.png" alt=""><footer><a href="' . $privacy . '">Privacy</a> <a href="' . $returns . '">Returns</a></footer></body></html>' ),
+			'/'                                           => array( 200, $head . '<link rel="alternate" type="application/rss+xml" href="/feed/"></head><body><h1>Store</h1><img src="a.jpg" alt="Mug"><img src="line.png" alt=""><footer><a href="' . $privacy . '#details">Privacy</a> <a href="' . $returns . '">Returns</a></footer></body></html>' ),
 			self::path( $this->product->get_permalink() ) => array( 200, $head . '<script type="application/ld+json">' . $jsonld . '</script></head><body><h1>' . $this->product->get_name() . '</h1><p>' . wc_price( (float) $this->product->get_price() ) . '</p><img src="p.jpg" alt="Front"></body></html>' ),
 		);
 	}
@@ -223,6 +223,13 @@ class RegressionGuardChecksTest extends WC_Unit_Test_Case {
 		$this->assertFalse( $this->results( $store )['pages_public'], 'A followed redirect to wp-login.php is a login wall' );
 
 		remove_all_filters( 'pre_http_request' );
+		unset( $store['/wp-login.php'] );
+		$store[ $path ]  = array( 302, '', array( 'location' => home_url( '/hop-1' ) ) );
+		$store['/hop-1'] = array( 302, '', array( 'location' => home_url( '/hop-2' ) ) );
+		$store['/hop-2'] = array( 302, '', array( 'location' => site_url( '/wp-login.php' ) ) );
+		$this->assertFalse( $this->results( $store )['pages_public'], 'A login redirect past the follow limit is still a login wall' );
+
+		remove_all_filters( 'pre_http_request' );
 		$store[ $path ] = array( 503, '' );
 		$this->assertNull( $this->results( $store )['pages_public'], 'A server error is couldn\'t check' );
 	}
@@ -305,6 +312,29 @@ class RegressionGuardChecksTest extends WC_Unit_Test_Case {
 		);
 		$store[ $path ]            = array( 200, '<html><script type="application/ld+json">' . wp_json_encode( array( $jsonld, $related ) ) . '</script><h1>' . $this->product->get_name() . '</h1></html>' );
 		$this->assertFalse( $this->results( $store )['schema_matches_product'], 'A related product at the right price doesn\'t stand in for the product\'s own offer' );
+
+		remove_all_filters( 'pre_http_request' );
+		unset( $jsonld['offers']['price'] );
+		$jsonld['offers']['@type']    = 'AggregateOffer';
+		$jsonld['offers']['lowPrice'] = '99.00';
+		$store[ $path ]               = array( 200, '<html><script type="application/ld+json">' . wp_json_encode( $jsonld ) . '</script><h1>' . $this->product->get_name() . '</h1></html>' );
+		$this->assertFalse( $this->results( $store )['schema_matches_product'], 'An AggregateOffer lowPrice is the price' );
+
+		remove_all_filters( 'pre_http_request' );
+		$jsonld['offers'] = array(
+			'@type'              => 'Offer',
+			'price'              => '8.00',
+			'priceCurrency'      => 'USD',
+			'availability'       => 'https://schema.org/InStock',
+			'priceSpecification' => array(
+				'@type'         => 'UnitPriceSpecification',
+				'priceType'     => 'https://schema.org/ListPrice',
+				'price'         => $this->product->get_price(),
+				'priceCurrency' => 'USD',
+			),
+		);
+		$store[ $path ]   = array( 200, '<html><script type="application/ld+json">' . wp_json_encode( $jsonld ) . '</script><h1>' . $this->product->get_name() . '</h1></html>' );
+		$this->assertFalse( $this->results( $store )['schema_matches_product'], 'A list price is not the current price' );
 	}
 
 	/**
@@ -312,7 +342,8 @@ class RegressionGuardChecksTest extends WC_Unit_Test_Case {
 	 */
 	public function test_schema_price_at_another_tax_rate(): void {
 		update_option( 'woocommerce_calc_taxes', 'yes' );
-		$rate = \WC_Tax::_insert_tax_rate(
+		$second = 0;
+		$rate   = \WC_Tax::_insert_tax_rate(
 			array(
 				'tax_rate_country' => 'DE',
 				'tax_rate'         => '25.0000',
@@ -341,7 +372,25 @@ class RegressionGuardChecksTest extends WC_Unit_Test_Case {
 			$this->product->set_tax_status( 'none' );
 			$this->product->save();
 			$this->assertFalse( $this->results( $store )['schema_matches_product'], 'A non-taxable product is not priced at a stored tax rate' );
+
+			remove_all_filters( 'pre_http_request' );
+			$this->product->set_tax_status( 'taxable' );
+			$this->product->save();
+			$second = \WC_Tax::_insert_tax_rate(
+				array(
+					'tax_rate_country' => 'FR',
+					'tax_rate'         => '5.0000',
+					'tax_rate_name'    => 'VAT',
+					'tax_rate_class'   => '',
+				)
+			);
+			$jsonld['offers']['price'] = '99.00';
+			$store[ $path ]            = array( 200, '<html><script type="application/ld+json">' . wp_json_encode( $jsonld ) . '</script><h1>' . $this->product->get_name() . '</h1></html>' );
+			$this->assertNull( $this->results( $store )['schema_matches_product'], 'Two rates of one class can apply together, so an unmatched price stays unknown' );
 		} finally {
+			if ( $second ) {
+				\WC_Tax::_delete_tax_rate( $second );
+			}
 			\WC_Tax::_delete_tax_rate( $rate );
 			delete_option( 'woocommerce_calc_taxes' );
 		}

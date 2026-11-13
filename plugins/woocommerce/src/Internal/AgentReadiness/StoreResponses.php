@@ -97,7 +97,13 @@ class StoreResponses {
 	public function get( string $url ): ?array {
 		$url = self::absolute( $url );
 		if ( ! array_key_exists( $url, $this->responses ) ) {
-			$this->responses[ $url ] = $this->site_live ? $this->fetch( $url ) : null;
+			// product_page() already loaded this URL, under its own key and with a larger cap.
+			$product_key = 'PRODUCT ' . $url;
+			if ( array_key_exists( $product_key, $this->responses ) ) {
+				$this->responses[ $url ] = $this->responses[ $product_key ];
+			} else {
+				$this->responses[ $url ] = $this->site_live ? $this->fetch( $url ) : null;
+			}
 		}
 		return $this->responses[ $url ];
 	}
@@ -285,7 +291,7 @@ class StoreResponses {
 				return $response;
 			}
 			$url = \WP_Http::make_absolute_url( $location, $url );
-			if ( is_string( wp_parse_url( $url, PHP_URL_QUERY ) ) ) {
+			if ( is_string( wp_parse_url( $url, PHP_URL_QUERY ) ) || $redirects >= self::MAX_REDIRECTS ) {
 				$this->redirects[ $asked ]['stopped_at'] = $url;
 				return null;
 			}

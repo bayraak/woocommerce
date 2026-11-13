@@ -1626,7 +1626,16 @@ class StoreOutputChecks {
 		$prices   = array();
 		$unparsed = false;
 		foreach ( self::offers( self::own_items( $products, $product ) ) as $offer ) {
-			foreach ( array_merge( array( $offer['price'] ?? null ), array_column( self::as_list( $offer['priceSpecification'] ?? null ), 'price' ) ) as $price ) {
+			$values = array( $offer['price'] ?? null, $offer['lowPrice'] ?? null );
+			foreach ( self::as_list( $offer['priceSpecification'] ?? null ) as $specification ) {
+				$type = (string) ( $specification['priceType'] ?? '' );
+				// ListPrice is a price that is not the current one, such as the price before a sale.
+				if ( 'ListPrice' === $type || str_ends_with( $type, '/ListPrice' ) ) {
+					continue;
+				}
+				$values[] = $specification['price'] ?? null;
+			}
+			foreach ( $values as $price ) {
 				if ( null === $price || '' === $price ) {
 					continue;
 				}
@@ -1644,11 +1653,10 @@ class StoreOutputChecks {
 		$excl     = (float) wc_get_price_excluding_tax( $product );
 		$expected = array( (float) $product->get_price(), (float) wc_get_price_including_tax( $product ), $excl );
 		// The page was served to one location; its tax may differ from the store's base rate.
-		if ( $product->is_taxable() ) {
-			$rates = \WC_Tax::get_rates_for_tax_class( $product->get_tax_class() );
-			foreach ( is_array( $rates ) ? $rates : array() as $rate ) {
-				$expected[] = $excl * ( 1 + (float) $rate->tax_rate / 100 );
-			}
+		$rates    = $product->is_taxable() ? \WC_Tax::get_rates_for_tax_class( $product->get_tax_class() ) : array();
+		$rates    = is_array( $rates ) ? $rates : array();
+		foreach ( $rates as $rate ) {
+			$expected[] = $excl * ( 1 + (float) $rate->tax_rate / 100 );
 		}
 		foreach ( $prices as $price ) {
 			foreach ( $expected as $amount ) {
@@ -1657,7 +1665,8 @@ class StoreOutputChecks {
 				}
 			}
 		}
-		return false;
+		// Several rates of one class can apply together, so a price that matches none of them stays unknown.
+		return count( $rates ) > 1 ? null : false;
 	}
 
 	/**
@@ -1672,7 +1681,7 @@ class StoreOutputChecks {
 			return true;
 		}
 		// wc_get_products() ignores meta_query, so the reviewed product is looked up as a post.
-		$ids     = get_posts(
+		$ids = get_posts(
 			array(
 				'post_type'        => 'product',
 				'post_status'      => ProductStatus::PUBLISH,
@@ -1751,16 +1760,19 @@ class StoreOutputChecks {
 		if ( null === $home || array() === $pages ) {
 			return null;
 		}
-		$normalize = static fn( string $url ): string => untrailingslashit( (string) preg_replace( '#^https?:#i', '', html_entity_decode( $url, ENT_QUOTES | ENT_HTML5, 'UTF-8' ) ) );
-		$links     = array();
-		$tags      = new \WP_HTML_Tag_Processor( $home['body'] );
+		$links = array();
+		$tags  = new \WP_HTML_Tag_Processor( $home['body'] );
 		while ( $tags->next_tag( array( 'tag_name' => 'a' ) ) ) {
-			$links[] = $normalize( (string) \WP_Http::make_absolute_url( (string) $tags->get_attribute( 'href' ), home_url( '/' ) ) );
+			$links[] = (string) \WP_Http::make_absolute_url( (string) $tags->get_attribute( 'href' ), home_url( '/' ) );
 		}
 		foreach ( $pages as $id ) {
-			if ( ! in_array( $normalize( (string) get_permalink( $id ) ), $links, true ) ) {
-				return false;
+			$permalink = (string) get_permalink( $id );
+			foreach ( $links as $link ) {
+				if ( self::same_page( $link, $permalink ) ) {
+					continue 2;
+				}
 			}
+			return false;
 		}
 		return true;
 	}
