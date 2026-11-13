@@ -705,7 +705,7 @@ class StoreOutputChecks {
 			if ( false === $end ) {
 				break;
 			}
-			$url = trim( str_replace( array( '<![CDATA[', ']]>' ), '', substr( $xml, $start, $end - $start ) ) );
+			$url = html_entity_decode( trim( str_replace( array( '<![CDATA[', ']]>' ), '', substr( $xml, $start, $end - $start ) ) ), ENT_QUOTES | ENT_XML1 );
 			if ( '' !== $url ) {
 				$urls[] = $url;
 			}
@@ -762,8 +762,7 @@ class StoreOutputChecks {
 		if ( null === $product ) {
 			return null;
 		}
-		$schemeless = static fn( string $url ): string => (string) preg_replace( '#^https?:#i', '', html_entity_decode( $url, ENT_QUOTES | ENT_HTML5, 'UTF-8' ) );
-		return 1 === count( $products ) && $schemeless( $product->get_permalink() . '#product' ) === $schemeless( (string) ( $products[0]['@id'] ?? '' ) );
+		return 1 === count( $products ) && self::comparable_url( $product->get_permalink() . '#product' ) === self::comparable_url( (string) ( $products[0]['@id'] ?? '' ) );
 	}
 
 	/**
@@ -1272,7 +1271,7 @@ class StoreOutputChecks {
 			if ( array() === $children ) {
 				continue;
 			}
-			$child = $responses->get( html_entity_decode( $children[0], ENT_QUOTES | ENT_XML1 ) );
+			$child = $responses->get( $children[0] );
 			if ( null === $child || self::blocked( $child['status'] ) ) {
 				$unknown = true;
 				continue;
@@ -1474,7 +1473,24 @@ class StoreOutputChecks {
 		if ( false !== $hash ) {
 			$value = substr( $value, 0, $hash );
 		}
-		return '' !== $value && untrailingslashit( $value ) === untrailingslashit( $permalink );
+		return '' !== $value && self::comparable_url( $value ) === self::comparable_url( $permalink );
+	}
+
+	/**
+	 * A URL compared the way a served page can differ from the stored permalink: entities decoded, scheme and trailing slash dropped.
+	 *
+	 * @param string $url URL.
+	 */
+	private static function comparable_url( string $url ): string {
+		$url   = html_entity_decode( $url, ENT_QUOTES | ENT_HTML5, 'UTF-8' );
+		$lower = strtolower( $url );
+		foreach ( array( 'https:', 'http:' ) as $scheme ) {
+			if ( str_starts_with( $lower, $scheme ) ) {
+				$url = substr( $url, strlen( $scheme ) );
+				break;
+			}
+		}
+		return untrailingslashit( $url );
 	}
 
 	/**

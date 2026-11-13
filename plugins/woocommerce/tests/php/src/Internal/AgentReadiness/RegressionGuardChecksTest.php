@@ -396,9 +396,9 @@ class RegressionGuardChecksTest extends WC_Unit_Test_Case {
 	public function test_truncated_review_page_is_unknown(): void {
 		update_option( 'woocommerce_enable_reviews', 'yes' );
 		update_option( 'woocommerce_enable_review_rating', 'yes' );
+		$this->product->set_date_created( time() - HOUR_IN_SECONDS );
+		$this->product->save();
 		$reviewed = WC_Helper_Product::create_simple_product();
-		$reviewed->set_date_created( time() + MINUTE_IN_SECONDS );
-		$reviewed->save();
 		update_post_meta( $reviewed->get_id(), '_wc_average_rating', '4.50' );
 		$path     = self::path( $reviewed->get_permalink() );
 		$rating   = '<script type="application/ld+json">' . wp_json_encode(
@@ -419,6 +419,13 @@ class RegressionGuardChecksTest extends WC_Unit_Test_Case {
 		remove_all_filters( 'pre_http_request' );
 		$store[ $path ] = array( 200, '<html></html>', array( 'content-length' => '99999999' ) );
 		$this->assertNull( $this->results( $store )['product_review_markup'], 'A page cut off before the rating is couldn\'t check' );
+
+		$reviewed->set_date_created( time() - HOUR_IN_SECONDS );
+		$reviewed->save();
+		$this->product->set_date_created( time() );
+		$this->product->save();
+		remove_all_filters( 'pre_http_request' );
+		$this->assertNull( $this->results( $store )['product_review_markup'], 'A different product\'s page, cut off, is couldn\'t check' );
 	}
 
 	/**
@@ -457,7 +464,15 @@ class RegressionGuardChecksTest extends WC_Unit_Test_Case {
 		$this->assertTrue( $this->results( $store )['sitemap_lastmod'], 'A CDATA child URL is still fetched' );
 
 		remove_all_filters( 'pre_http_request' );
-		$store['/products.xml'] = array( 200, '<urlset><url><loc>a</loc></url></urlset>' );
+		$queried                  = home_url( '/products.xml?page=2&type=product' );
+		$store['/wp-sitemap.xml'] = array( 200, '<sitemapindex><sitemap><loc>' . str_replace( '&', '&amp;', $queried ) . '</loc></sitemap></sitemapindex>' );
+		unset( $store['/products.xml'] );
+		$store[ self::path( $queried ) ] = array( 200, '<urlset><url><loc>a</loc><lastmod>2026-01-01</lastmod></url></urlset>' );
+		$this->assertTrue( $this->results( $store )['sitemap_lastmod'], 'An escaped query string in a child URL is still fetched' );
+
+		remove_all_filters( 'pre_http_request' );
+		$store['/wp-sitemap.xml'] = array( 200, "<sitemapindex><sitemap><loc>$child</loc></sitemap></sitemapindex>" );
+		$store['/products.xml']   = array( 200, '<urlset><url><loc>a</loc></url></urlset>' );
 		$this->assertFalse( $this->results( $store )['sitemap_lastmod'] );
 
 		remove_all_filters( 'pre_http_request' );

@@ -118,32 +118,6 @@ class StoreResponses {
 	}
 
 	/**
-	 * The response to a JSON POST to a URL on the store's host, such as a UCP endpoint. Redirects are not followed.
-	 *
-	 * @deprecated 11.4.0 UCP checks read the endpoint with get().
-	 *
-	 * @param string               $url  URL or path.
-	 * @param array<string, mixed> $body Request body.
-	 * @return array{status:int,body:string,headers:array<string,string>,truncated:bool}|null Null when the store could not be reached.
-	 */
-	public function post_json( string $url, array $body ): ?array {
-		$url  = self::absolute( $url );
-		$json = (string) wp_json_encode( $body );
-		$key  = 'POST ' . $url . ' ' . $json;
-		if ( ! array_key_exists( $key, $this->responses ) ) {
-			$this->responses[ $key ] = $this->site_live && $this->is_store_url( $url ) ? $this->request(
-				$url,
-				array(
-					'method'  => 'POST',
-					'headers' => array( 'Content-Type' => 'application/json' ),
-					'body'    => $json,
-				)
-			) : null;
-		}
-		return $this->responses[ $key ];
-	}
-
-	/**
 	 * How many redirects `get()` followed for a URL, the URL of a redirect it didn't follow ('' when none), and the URL it landed on.
 	 *
 	 * @param string $url URL or path, as given to `get()`.
