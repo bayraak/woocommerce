@@ -411,8 +411,8 @@ class RegressionGuardChecksTest extends WC_Unit_Test_Case {
 		$this->product->save();
 		$reviewed = WC_Helper_Product::create_simple_product();
 		update_post_meta( $reviewed->get_id(), '_wc_average_rating', '4.50' );
-		$path     = self::path( $reviewed->get_permalink() );
-		$rating   = '<script type="application/ld+json">' . wp_json_encode(
+		$path   = self::path( $reviewed->get_permalink() );
+		$rating = '<script type="application/ld+json">' . wp_json_encode(
 			array(
 				'@type'           => 'Product',
 				'name'            => $reviewed->get_name(),

@@ -1102,7 +1102,7 @@ class StoreOutputChecks {
 	}
 
 	/**
-	 * @id values an item's isVariantOf gives.
+	 * Identifiers an item's isVariantOf property gives.
 	 *
 	 * @param array<string, mixed> $item Product item.
 	 * @return array<int, string>
@@ -1623,8 +1623,8 @@ class StoreOutputChecks {
 		if ( '' === $product->get_price() || $product->is_type( 'variable' ) ) {
 			return true;
 		}
-		$prices    = array();
-		$unparsed  = false;
+		$prices   = array();
+		$unparsed = false;
 		foreach ( self::offers( self::own_items( $products, $product ) ) as $offer ) {
 			foreach ( array_merge( array( $offer['price'] ?? null ), array_column( self::as_list( $offer['priceSpecification'] ?? null ), 'price' ) ) as $price ) {
 				if ( null === $price || '' === $price ) {
@@ -1682,7 +1682,7 @@ class StoreOutputChecks {
 				'orderby'          => 'date',
 				'order'            => 'DESC',
 				'suppress_filters' => false,
-				// phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_tax_query, WordPress.DB.SlowDBQuery.slow_db_query_meta_query -- Five rows, once per background scan.
+				// phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_tax_query -- Five rows, once per background scan.
 				'tax_query'        => array(
 					array(
 						'taxonomy' => 'product_visibility',
@@ -1691,6 +1691,7 @@ class StoreOutputChecks {
 						'operator' => 'NOT IN',
 					),
 				),
+				// phpcs:ignore WordPress.DB.SlowDBQuery.slow_db_query_meta_query -- Five rows, once per background scan.
 				'meta_query'       => array(
 					array(
 						'key'     => '_wc_average_rating',
