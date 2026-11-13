@@ -59,9 +59,9 @@ class StoreResponses {
 	private array $responses = array();
 
 	/**
-	 * How `get()` reached each URL: the redirects it followed, and where it stopped when it didn't follow one.
+	 * How `get()` reached each URL: the redirects it followed, where it stopped when it didn't follow one, and the URL it landed on.
 	 *
-	 * @var array<string, array{count:int,stopped_at:string}>
+	 * @var array<string, array{count:int,stopped_at:string,final_url:string}>
 	 */
 	private array $redirects = array();
 
@@ -118,15 +118,16 @@ class StoreResponses {
 	}
 
 	/**
-	 * How many redirects `get()` followed for a URL, and the URL of a redirect it didn't follow ('' when none).
+	 * How many redirects `get()` followed for a URL, the URL of a redirect it didn't follow ('' when none), and the URL it landed on.
 	 *
 	 * @param string $url URL or path, as given to `get()`.
-	 * @return array{count:int,stopped_at:string}
+	 * @return array{count:int,stopped_at:string,final_url:string}
 	 */
 	public function redirects( string $url ): array {
 		return $this->redirects[ self::absolute( $url ) ] ?? array(
 			'count'      => 0,
 			'stopped_at' => '',
+			'final_url'  => '',
 		);
 	}
 
@@ -263,6 +264,7 @@ class StoreResponses {
 			$this->redirects[ $asked ] = array(
 				'count'      => $redirects,
 				'stopped_at' => '',
+				'final_url'  => '',
 			);
 			if ( ! $this->is_store_url( $url ) ) {
 				$this->redirects[ $asked ]['stopped_at'] = $url;
@@ -279,6 +281,7 @@ class StoreResponses {
 			}
 			$location = $response['headers']['location'] ?? '';
 			if ( $response['status'] < 300 || $response['status'] >= 400 || '' === $location ) {
+				$this->redirects[ $asked ]['final_url'] = $url;
 				return $response;
 			}
 			$url = \WP_Http::make_absolute_url( $location, $url );

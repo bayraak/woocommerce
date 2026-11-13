@@ -301,7 +301,7 @@ class StoreOutputChecks {
 			array(
 				'id'      => 'no_noindex_directives',
 				'group'   => 'access',
-				'test'    => fn( StoreResponses $responses ): ?bool => $this->on_pages( $responses, static fn( string $html, array $headers ): bool => 1 !== preg_match( '/(?<![\w:-])(noindex|none|noai|noimageai)(?![\w-])/', self::robots_rules( $html, $headers ) ) ),
+				'test'    => fn( StoreResponses $responses ): ?bool => $this->on_pages( $responses, static fn( string $html, array $headers ): bool => ! self::restricts_indexing( self::robots_rules( $html, $headers ) ) ),
 				'blocks'  => 'listing',
 				'name'    => __( 'Pages let search and AI crawlers index them', 'woocommerce' ),
 				'label'   => __( 'Pages ask search and AI crawlers not to index them', 'woocommerce' ),
@@ -1166,6 +1166,39 @@ class StoreOutputChecks {
 	}
 
 	/**
+	 * Whether robots rules ask crawlers not to index the page. `none` as the value of
+	 * max-image-preview, max-snippet, max-video-preview or unavailable_after does not.
+	 *
+	 * @param string $rules Lowercase robots rules.
+	 */
+	private static function restricts_indexing( string $rules ): bool {
+		$blocking = array( 'noindex', 'none', 'noai', 'noimageai' );
+		$valued   = array( 'max-image-preview', 'max-snippet', 'max-video-preview', 'unavailable_after' );
+		foreach ( explode( ',', $rules ) as $directive ) {
+			$directive = trim( $directive );
+			if ( '' === $directive ) {
+				continue;
+			}
+			$colon = strpos( $directive, ':' );
+			if ( false === $colon ) {
+				if ( in_array( $directive, $blocking, true ) ) {
+					return true;
+				}
+				continue;
+			}
+			$name  = trim( substr( $directive, 0, $colon ) );
+			$value = trim( substr( $directive, $colon + 1 ) );
+			if ( in_array( $name, $valued, true ) ) {
+				continue;
+			}
+			if ( in_array( $name, $blocking, true ) || in_array( $value, $blocking, true ) ) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
 	 * The home, shop and product page URLs a visitor would open first; shop and product only when the store has them.
 	 *
 	 * @param StoreResponses $responses Store responses.
@@ -1187,17 +1220,28 @@ class StoreOutputChecks {
 		$account = (string) wp_parse_url( wc_get_page_permalink( 'myaccount', '' ), PHP_URL_PATH );
 		foreach ( self::store_page_urls( $responses ) as $url ) {
 			$response = $responses->get( $url );
+			$followed = $responses->redirects( $url );
+			if ( self::sign_in_path( $followed['stopped_at'], $account ) || self::sign_in_path( $followed['final_url'], $account ) ) {
+				return false;
+			}
 			if ( null === $response ) {
-				$path = (string) wp_parse_url( $responses->redirects( $url )['stopped_at'], PHP_URL_PATH );
-				if ( '' !== $path && ( str_ends_with( $path, '/wp-login.php' ) || ( '' !== $account && '/' !== $account && untrailingslashit( $path ) === untrailingslashit( $account ) ) ) ) {
-					return false;
-				}
 				$unknown = true;
 			} elseif ( in_array( $response['status'], array( 401, 403 ), true ) ) {
 				return false;
 			}
 		}
 		return $unknown ? null : true;
+	}
+
+	/**
+	 * Whether a URL is the sign-in page or wp-login.php.
+	 *
+	 * @param string $url     URL, or '' when there is none.
+	 * @param string $account Path of the My Account page.
+	 */
+	private static function sign_in_path( string $url, string $account ): bool {
+		$path = (string) wp_parse_url( $url, PHP_URL_PATH );
+		return '' !== $path && ( str_ends_with( $path, '/wp-login.php' ) || ( '' !== $account && '/' !== $account && untrailingslashit( $path ) === untrailingslashit( $account ) ) );
 	}
 
 	/**
@@ -1211,7 +1255,7 @@ class StoreOutputChecks {
 		$unknown = null === $robots;
 		foreach ( self::sitemap_urls( (string) $robots ) as $url ) {
 			$response = $responses->get( $url );
-			if ( null === $response || $response['status'] >= 500 ) {
+			if ( null === $response || self::blocked( $response['status'] ) ) {
 				$unknown = true;
 				continue;
 			}
@@ -1225,7 +1269,7 @@ class StoreOutputChecks {
 				continue;
 			}
 			$child = $responses->get( html_entity_decode( $first[1], ENT_QUOTES | ENT_XML1 ) );
-			if ( null === $child || $child['status'] >= 500 ) {
+			if ( null === $child || self::blocked( $child['status'] ) ) {
 				$unknown = true;
 				continue;
 			}
@@ -1442,9 +1486,11 @@ class StoreOutputChecks {
 		$excl     = (float) wc_get_price_excluding_tax( $product );
 		$expected = array( (float) $product->get_price(), (float) wc_get_price_including_tax( $product ), $excl );
 		// The page was served to one location; its tax may differ from the store's base rate.
-		$rates = \WC_Tax::get_rates_for_tax_class( $product->get_tax_class() );
-		foreach ( is_array( $rates ) ? $rates : array() as $rate ) {
-			$expected[] = $excl * ( 1 + (float) $rate->tax_rate / 100 );
+		if ( $product->is_taxable() ) {
+			$rates = \WC_Tax::get_rates_for_tax_class( $product->get_tax_class() );
+			foreach ( is_array( $rates ) ? $rates : array() as $rate ) {
+				$expected[] = $excl * ( 1 + (float) $rate->tax_rate / 100 );
+			}
 		}
 		foreach ( $prices as $price ) {
 			foreach ( $expected as $amount ) {
@@ -1504,7 +1550,7 @@ class StoreOutputChecks {
 		if ( null === $page || 200 !== $page['status'] ) {
 			return null;
 		}
-		foreach ( JsonLd::items( $page['body'], 'Product', 'ProductGroup' ) as $item ) {
+		foreach ( self::naming( JsonLd::items( $page['body'], 'Product', 'ProductGroup' ), $product ) as $item ) {
 			if ( ! empty( $item['aggregateRating'] ) || ! empty( $item['review'] ) ) {
 				return true;
 			}
