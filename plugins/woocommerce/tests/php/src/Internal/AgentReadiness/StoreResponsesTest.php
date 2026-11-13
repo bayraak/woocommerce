@@ -109,6 +109,35 @@ class StoreResponsesTest extends WC_Unit_Test_Case {
 	}
 
 	/**
+	 * @testdox post_json still posts JSON to a store URL. UCP checks read the endpoint with get() now.
+	 */
+	public function test_post_json_posts_json(): void {
+		add_filter(
+			'pre_http_request',
+			static function ( $pre, $args, $url ) {
+				unset( $pre );
+				return array(
+					'headers'  => array(),
+					'body'     => (string) ( $args['body'] ?? '' ),
+					'response' => array(
+						'code'    => 'POST' === ( $args['method'] ?? '' ) && home_url( '/wc/ucp/v1' ) === $url ? 200 : 500,
+						'message' => '',
+					),
+					'cookies'  => array(),
+				);
+			},
+			10,
+			3
+		);
+		$sut = new StoreResponses( true );
+
+		$response = $sut->post_json( '/wc/ucp/v1', array( 'id' => 'checkout' ) );
+
+		$this->assertSame( 200, $response['status'] );
+		$this->assertSame( '{"id":"checkout"}', $response['body'] );
+	}
+
+	/**
 	 * @testdox Redirects on the store's host are followed; a redirect to another host is not requested.
 	 */
 	public function test_redirects_stay_on_the_store_host(): void {

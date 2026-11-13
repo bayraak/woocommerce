@@ -1268,10 +1268,11 @@ class StoreOutputChecks {
 			if ( false !== stripos( $response['body'], '<lastmod' ) ) {
 				return true;
 			}
-			if ( 1 !== preg_match( '#<sitemapindex.*?<loc>\s*(.+?)\s*</loc>#is', $response['body'], $first ) ) {
+			$children = self::index_child_urls( $response['body'] );
+			if ( array() === $children ) {
 				continue;
 			}
-			$child = $responses->get( html_entity_decode( $first[1], ENT_QUOTES | ENT_XML1 ) );
+			$child = $responses->get( html_entity_decode( $children[0], ENT_QUOTES | ENT_XML1 ) );
 			if ( null === $child || self::blocked( $child['status'] ) ) {
 				$unknown = true;
 				continue;
@@ -1433,8 +1434,8 @@ class StoreOutputChecks {
 	}
 
 	/**
-	 * The Product items that name the product, or all of them when none does: another product on the page, such
-	 * as an upsell, doesn't count, but a page whose JSON-LD names the product differently is still judged.
+	 * The Product items that are this product: the ones that name it, or, when none does, the ones whose
+	 * url or @id is its permalink. An upsell that matches neither is left out.
 	 *
 	 * @param array<int, array<string, mixed>> $products Product items.
 	 * @param \WC_Product                      $product  The product of the page.
@@ -1442,7 +1443,38 @@ class StoreOutputChecks {
 	 */
 	private static function own_items( array $products, \WC_Product $product ): array {
 		$named = self::naming( $products, $product );
-		return array() === $named ? $products : $named;
+		if ( array() !== $named ) {
+			return $named;
+		}
+		$permalink = (string) $product->get_permalink();
+		return array_values(
+			array_filter(
+				$products,
+				static function ( array $item ) use ( $permalink ): bool {
+					foreach ( array( 'url', '@id' ) as $key ) {
+						$value = $item[ $key ] ?? null;
+						if ( is_string( $value ) && self::same_page( $value, $permalink ) ) {
+							return true;
+						}
+					}
+					return false;
+				}
+			)
+		);
+	}
+
+	/**
+	 * Whether a JSON-LD url or @id points at this product's permalink. A fragment after # is ignored.
+	 *
+	 * @param string $value     url or @id.
+	 * @param string $permalink Product permalink.
+	 */
+	private static function same_page( string $value, string $permalink ): bool {
+		$hash = strpos( $value, '#' );
+		if ( false !== $hash ) {
+			$value = substr( $value, 0, $hash );
+		}
+		return '' !== $value && untrailingslashit( $value ) === untrailingslashit( $permalink );
 	}
 
 	/**
@@ -1549,16 +1581,25 @@ class StoreOutputChecks {
 		if ( null === $product ) {
 			return true;
 		}
-		$page = $responses->get( (string) $product->get_permalink() );
-		if ( null === $page || 200 !== $page['status'] ) {
-			return null;
+		$sampled = $responses->product();
+		if ( null !== $sampled && $sampled->get_id() === $product->get_id() ) {
+			$page = $responses->product_page();
+			if ( null === $page ) {
+				return null;
+			}
+		} else {
+			$page = $responses->get( (string) $product->get_permalink() );
+			if ( null === $page || 200 !== $page['status'] ) {
+				return null;
+			}
 		}
 		foreach ( self::naming( JsonLd::items( $page['body'], 'Product', 'ProductGroup' ), $product ) as $item ) {
 			if ( ! empty( $item['aggregateRating'] ) || ! empty( $item['review'] ) ) {
 				return true;
 			}
 		}
-		return false;
+		// A cut-off page can hide the rating. That is "couldn't check", not "missing".
+		return $page['truncated'] ? null : false;
 	}
 
 	/**

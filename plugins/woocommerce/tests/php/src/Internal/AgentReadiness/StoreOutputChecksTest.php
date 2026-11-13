@@ -572,6 +572,21 @@ class StoreOutputChecksTest extends WC_Unit_Test_Case {
 			'gtin13' => '9780306406157',
 		);
 		$this->assertFalse( $this->served_identifiers( $product, array( $plugin, $upsell ) )['gtin'], 'Another product\'s GTIN on the page doesn\'t count' );
+		$this->assertFalse( $this->served_identifiers( $product, array( $upsell ) )['gtin'], 'An upsell alone is not this product' );
+		$this->assertTrue(
+			$this->served_identifiers(
+				$product,
+				array(
+					array(
+						'@type'  => 'Product',
+						'name'   => 'Sold as something else',
+						'url'    => $product->get_permalink() . '#product',
+						'gtin13' => '4006381333931',
+					),
+				)
+			)['gtin'],
+			'A different name still counts when the url is this product'
+		);
 
 		$product->set_global_unique_id( '' );
 		$product->save();

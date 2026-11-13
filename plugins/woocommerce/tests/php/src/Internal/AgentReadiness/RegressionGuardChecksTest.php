@@ -5,6 +5,7 @@ namespace Automattic\WooCommerce\Tests\Internal\AgentReadiness;
 
 use Automattic\WooCommerce\Internal\AgentReadiness\AgenticCommerceSettings;
 use Automattic\WooCommerce\Internal\AgentReadiness\StoreOutputChecks;
+use Automattic\WooCommerce\Internal\AgentReadiness\StoreResponses;
 use WC_Helper_Product;
 use WC_Structured_Data;
 use WC_Unit_Test_Case;
@@ -390,6 +391,37 @@ class RegressionGuardChecksTest extends WC_Unit_Test_Case {
 	}
 
 	/**
+	 * @testdox A review page cut off before its rating is couldn't check. The sampled product is read past the short page limit.
+	 */
+	public function test_truncated_review_page_is_unknown(): void {
+		update_option( 'woocommerce_enable_reviews', 'yes' );
+		update_option( 'woocommerce_enable_review_rating', 'yes' );
+		$reviewed = WC_Helper_Product::create_simple_product();
+		$reviewed->set_date_created( time() + MINUTE_IN_SECONDS );
+		$reviewed->save();
+		update_post_meta( $reviewed->get_id(), '_wc_average_rating', '4.50' );
+		$path     = self::path( $reviewed->get_permalink() );
+		$rating   = '<script type="application/ld+json">' . wp_json_encode(
+			array(
+				'@type'           => 'Product',
+				'name'            => $reviewed->get_name(),
+				'aggregateRating' => array(
+					'@type'       => 'AggregateRating',
+					'ratingValue' => '4.5',
+				),
+			)
+		) . '</script>';
+
+		$store          = $this->healthy_store();
+		$store[ $path ] = array( 200, str_repeat( 'x', StoreResponses::MAX_BYTES ) . $rating );
+		$this->assertTrue( $this->results( $store )['product_review_markup'], 'The sampled product is read past the short page limit' );
+
+		remove_all_filters( 'pre_http_request' );
+		$store[ $path ] = array( 200, '<html></html>', array( 'content-length' => '99999999' ) );
+		$this->assertNull( $this->results( $store )['product_review_markup'], 'A page cut off before the rating is couldn\'t check' );
+	}
+
+	/**
 	 * @testdox When the newest reviewed product is hidden, the next visible reviewed product is read.
 	 */
 	public function test_review_markup_skips_hidden_products(): void {
@@ -419,6 +451,10 @@ class RegressionGuardChecksTest extends WC_Unit_Test_Case {
 		$store['/wp-sitemap.xml'] = array( 200, "<sitemapindex><sitemap><loc>$child</loc></sitemap></sitemapindex>" );
 		$store['/products.xml']   = array( 200, '<urlset><url><loc>a</loc><lastmod>2026-01-01</lastmod></url></urlset>' );
 		$this->assertTrue( $this->results( $store )['sitemap_lastmod'] );
+
+		remove_all_filters( 'pre_http_request' );
+		$store['/wp-sitemap.xml'] = array( 200, '<sitemapindex><sitemap><loc><![CDATA[' . $child . ']]></loc></sitemap></sitemapindex>' );
+		$this->assertTrue( $this->results( $store )['sitemap_lastmod'], 'A CDATA child URL is still fetched' );
 
 		remove_all_filters( 'pre_http_request' );
 		$store['/products.xml'] = array( 200, '<urlset><url><loc>a</loc></url></urlset>' );
