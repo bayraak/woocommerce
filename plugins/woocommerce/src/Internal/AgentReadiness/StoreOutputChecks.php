@@ -1069,7 +1069,40 @@ class StoreOutputChecks {
 	 */
 	private static function identifier_items( array $products, \WC_Product $product ): array {
 		$own = self::own_items( $products, $product );
-		return self::with_variants( array_merge( $own, self::variants_of( $own, $products ) ) );
+		return self::with_variants( self::with_referenced_variants( array_merge( $own, self::variants_of( $own, $products ) ), $products ) );
+	}
+
+	/**
+	 * Replace a hasVariant entry that is only an @id with the Product node that id names.
+	 *
+	 * @param array<int, array<string, mixed>> $items     Selected items.
+	 * @param array<int, array<string, mixed>> $products Every Product item on the page.
+	 * @return array<int, array<string, mixed>>
+	 */
+	private static function with_referenced_variants( array $items, array $products ): array {
+		$by_id = array();
+		foreach ( $products as $item ) {
+			$id = $item['@id'] ?? null;
+			if ( is_string( $id ) && '' !== $id ) {
+				$by_id[ self::comparable_url( $id ) ] = $item;
+			}
+		}
+		foreach ( $items as $index => $item ) {
+			$variants = array();
+			foreach ( self::as_list( $item['hasVariant'] ?? null ) as $variant ) {
+				$id = $variant['@id'] ?? null;
+				if ( ! is_string( $id ) || '' === $id || array() !== array_diff( array_keys( $variant ), array( '@id', '@type' ) ) ) {
+					$variants[] = $variant;
+					continue;
+				}
+				$key        = self::comparable_url( $id );
+				$variants[] = $by_id[ $key ] ?? $variant;
+			}
+			if ( array() !== $variants ) {
+				$items[ $index ]['hasVariant'] = $variants;
+			}
+		}
+		return $items;
 	}
 
 	/**
@@ -1259,7 +1292,8 @@ class StoreOutputChecks {
 	 * @param array<string, string> $headers Response headers.
 	 */
 	private static function robots_rules( string $html, array $headers ): string {
-		$rules   = PageMarkup::meta( $html, 'name', static fn( string $name ): bool => 'robots' === $name || str_ends_with( $name, 'bot' ) );
+		// googlebot-news contains "bot" without ending in it. "robots" does too.
+		$rules   = PageMarkup::meta( $html, 'name', static fn( string $name ): bool => str_contains( $name, 'bot' ) );
 		$rules[] = $headers['x-robots-tag'] ?? '';
 		return strtolower( implode( ', ', $rules ) );
 	}

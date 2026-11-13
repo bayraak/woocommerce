@@ -623,6 +623,25 @@ class StoreOutputChecksTest extends WC_Unit_Test_Case {
 			)['gtin'],
 			'A variant linked with isVariantOf counts'
 		);
+		$this->assertTrue(
+			$this->served_identifiers(
+				$product,
+				array(
+					array(
+						'@type'      => 'ProductGroup',
+						'name'       => $product->get_name(),
+						'hasVariant' => array( array( '@id' => '#red' ) ),
+					),
+					array(
+						'@type'  => 'Product',
+						'name'   => 'Mug - Red',
+						'@id'    => '#red',
+						'gtin13' => '4006381333931',
+					),
+				)
+			)['gtin'],
+			'A variant named only by hasVariant @id counts'
+		);
 
 		$product->set_global_unique_id( '' );
 		$product->save();

@@ -348,8 +348,7 @@ class DeclaredToAgents {
 		// Each value is <target> followed by ;-separated parameters; rel holds space-separated tokens.
 		preg_match_all( '/<([^>]*)>((?:[^,"<]|"[^"]*")*)/', $page['headers']['link'] ?? '', $values, PREG_SET_ORDER );
 		foreach ( $values as $value ) {
-			$path = wp_parse_url( trim( $value[1] ), PHP_URL_PATH );
-			if ( is_string( $path ) && '/llms.txt' === $path ) {
+			if ( '/llms.txt' === self::link_target_path( trim( $value[1] ) ) ) {
 				return true;
 			}
 			// Parameters are read left to right, so a quoted value is taken whole, ; and rel= in it included.
@@ -361,5 +360,18 @@ class DeclaredToAgents {
 			}
 		}
 		return false;
+	}
+
+	/**
+	 * Path of a Link target resolved against the home page. `llms.txt` and `./llms.txt` there are `/llms.txt`.
+	 *
+	 * @param string $target Target from the Link header.
+	 */
+	private static function link_target_path( string $target ): string {
+		while ( str_starts_with( $target, './' ) ) {
+			$target = substr( $target, 2 );
+		}
+		$path = wp_parse_url( \WP_Http::make_absolute_url( $target, home_url( '/' ) ), PHP_URL_PATH );
+		return is_string( $path ) ? $path : '';
 	}
 }
