@@ -384,6 +384,7 @@ class RegressionGuardChecksTest extends WC_Unit_Test_Case {
 					'tax_rate_class'   => '',
 				)
 			);
+
 			$jsonld['offers']['price'] = '99.00';
 			$store[ $path ]            = array( 200, '<html><script type="application/ld+json">' . wp_json_encode( $jsonld ) . '</script><h1>' . $this->product->get_name() . '</h1></html>' );
 			$this->assertNull( $this->results( $store )['schema_matches_product'], 'Two rates of one class can apply together, so an unmatched price stays unknown' );
