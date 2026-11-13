@@ -159,10 +159,14 @@ class RegressionGuardChecksTest extends WC_Unit_Test_Case {
 		$this->assertTrue( $this->results( $store )['no_noindex_directives'] );
 
 		remove_all_filters( 'pre_http_request' );
-		$store['/'] = array( 200, '<html><head><meta name="robots" content="index, follow, max-image-preview: none, max-video-preview: none"></head></html>' );
+		$store['/'] = array( 200, '<html><head><meta name="robots" content="index, follow, max-image-preview:none, max-video-preview:none"></head></html>' );
 		$this->assertTrue( $this->results( $store )['no_noindex_directives'], 'none as a preview size is not the none directive' );
 
-		foreach ( array( '<meta name="robots" content="noindex, follow">', '<meta name="googlebot" content="none">', '<meta name="robots" content="noai, noimageai">' ) as $tag ) {
+		remove_all_filters( 'pre_http_request' );
+		$store['/'] = array( 200, '<html><head><meta name="robots" content="index, follow, max-image-preview: none, max-video-preview: none"></head></html>' );
+		$this->assertTrue( $this->results( $store )['no_noindex_directives'], 'none as a preview size, with a space, is not the none directive' );
+
+		foreach ( array( '<meta name="robots" content="noindex, follow">', '<meta name="robots" content="noindex nofollow">', '<meta name="googlebot" content="none">', '<meta name="robots" content="noai, noimageai">' ) as $tag ) {
 			remove_all_filters( 'pre_http_request' );
 			$store['/'] = array( 200, '<html><head>' . $tag . '</head></html>' );
 			$this->assertFalse( $this->results( $store )['no_noindex_directives'], $tag );

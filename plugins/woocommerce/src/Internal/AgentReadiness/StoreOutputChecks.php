@@ -1181,8 +1181,11 @@ class StoreOutputChecks {
 			}
 			$colon = strpos( $directive, ':' );
 			if ( false === $colon ) {
-				if ( in_array( $directive, $blocking, true ) ) {
-					return true;
+				// A comma is the usual separator; "noindex nofollow" is the same pair written with a space.
+				foreach ( explode( ' ', str_replace( "\t", ' ', $directive ) ) as $token ) {
+					if ( in_array( $token, $blocking, true ) ) {
+						return true;
+					}
 				}
 				continue;
 			}
